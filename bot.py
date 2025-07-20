@@ -1,103 +1,54 @@
-import stripe
-import os
-import html
-import requests
+import random
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# 🛡️ Replace with your Stripe test secret key
+# --- Helper Functions ---
 
-stripe.api_key = os.environ["MY_SECRET"]
-
-# 🟢 /start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 Bot is live!\n\n📥 Send your card(s) in this format:\n"
-        "`4242424242424242|12|2025|123`\n\n"
-        "You can also send multiple cards (one per line).",
-        parse_mode="Markdown"
-    )
-
-# 🔍 Main Card Checker
-# Test card prefixes
-TEST_CARD_PREFIXES = [
-    "424242", "400005", "555555", "222300", "520082", "378282", "601111"
-]
-
-def is_test_card(number):
-    return number[:6] in TEST_CARD_PREFIXES
-
-async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = update.message.text.strip().split("\n")
+def generate_cc(bin_input: str, count: int = 30):
     results = []
+    bin_input = bin_input.strip().replace("x", "X")
 
-    for line in lines:
-        parts = line.strip().split("|")
-        if len(parts) != 4:
-            results.append(f"❌ Invalid format: {html.escape(line)}")
-            continue
-
-        number, month, year, cvc = parts
-        bin_number = number[:6]
-
-        # BIN Lookup
-        try:
-            res = requests.get(f"https://lookup.binlist.net/{bin_number}")
-            if res.status_code == 200:
-                data = res.json()
-                brand = data.get("scheme", "N/A").title()
-                bank = data.get("bank", {}).get("name", "N/A")
-                country = data.get("country", {}).get("name", "N/A")
-                bin_info = f"{brand} - {bank} ({country})"
+    for _ in range(count):
+        cc = ""
+        for char in bin_input:
+            if char == "X":
+                cc += str(random.randint(0, 9))
             else:
-                bin_info = "Unknown BIN"
-        except:
-            bin_info = "BIN Lookup Failed"
+                cc += char
 
-        # Stripe PaymentIntent with auto-methods and no redirects
-        try:
-            intent = stripe.PaymentIntent.create(
-                amount=100,
-                currency="usd",
-                payment_method_data={
-                    "type": "card",
-                    "card": {
-                        "number": number,
-                        "exp_month": int(month),
-                        "exp_year": int(year),
-                        "cvc": cvc,
-                    },
-                },
-                confirm=True,
-                capture_method="manual",
-                automatic_payment_methods={
-                    "enabled": True,
-                    "allow_redirects": "never"
-                }
-            )
+        mm = str(random.randint(1, 12)).zfill(2)
+        yyyy = str(random.randint(2025, 2030))
+        cvv = str(random.randint(100, 999))
 
-            if intent.status == "requires_capture":
-                card_type = "Test Card" if is_test_card(number) else "Real Card"
-                result = f"✅ Approved ({card_type}) | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
-            else:
-                result = f"⚠️ Failed ({intent.status}) | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+        results.append(f"{cc}|{mm}|{yyyy}|{cvv}")
+    return results
 
-        except stripe.error.CardError as e:
-            result = f"❌ Declined: {e.user_message} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
-        except Exception as e:
-            result = f"❌ Error: {str(e)} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+# --- Command Handler ---
 
-        results.append(result)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Send me a BIN with Xs. Example:\n\n`414709XXXXXXXXXX`", parse_mode="Markdown")
 
-    reply = "\n\n".join(results)
-    await update.message.reply_text(reply, parse_mode="HTML")
+async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Please provide a BIN. Example:\n`/gen 414709XXXXXXXXXX`", parse_mode="Markdown")
+        return
 
-# 🚀 Bot Launcher
-if __name__ == "__main__":
-    app = Application.builder().token("8017193630:AAFaMRpJ7Hk-2MTibaWOR_71-NYuFgr_2_U").build()
+    bin_input = context.args[0]
+    cc_list = generate_cc(bin_input)
+
+    msg = "\n".join(cc_list)
+    await update.message.reply_text(f"✅ Generated 30 CCs:\n\n<code>{msg}</code>", parse_mode="HTML")
+
+# --- Main Bot Setup ---
+
+def main():
+    app = ApplicationBuilder().token("8017193630:AAFaMRpJ7Hk-2MTibaWOR_71-NYuFgr_2_U").build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_card))
+    app.add_handler(CommandHandler("gen", generate))
 
-    print("🤖 Bot is running...")
+    print("Bot is running...")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
