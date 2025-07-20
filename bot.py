@@ -18,6 +18,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # 🔍 Main Card Checker
+import html
+
 async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = update.message.text.strip().split("\n")
     results = []
@@ -25,7 +27,7 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for line in lines:
         parts = line.strip().split("|")
         if len(parts) != 4:
-            results.append(f"❌ Invalid format: `{line}`")
+            results.append(f"❌ Invalid format: {html.escape(line)}")
             continue
 
         number, month, year, cvc = parts
@@ -45,7 +47,7 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             bin_info = "BIN Lookup Failed"
 
-        # ✅ Stripe Auth Check
+        # ✅ Stripe Auth Check (No capture, no redirect)
         try:
             intent = stripe.PaymentIntent.create(
                 amount=100,
@@ -60,26 +62,28 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     },
                 },
                 confirm=True,
-                capture_method="manual"
+                capture_method="manual",
+                automatic_payment_methods={
+                    "enabled": True,
+                    "allow_redirects": "never"
+                }
             )
 
             if intent.status == "requires_capture":
-                result = f"✅ Approved | `{number[:6]}******{number[-4:]}` | {bin_info}"
+                result = f"✅ Approved | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
             else:
-                result = f"⚠️ Failed ({intent.status}) | `{number[:6]}******{number[-4:]}` | {bin_info}"
+                result = f"⚠️ Failed ({intent.status}) | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
 
         except stripe.error.CardError as e:
-            result = f"❌ Declined: {e.user_message} | `{number[:6]}******{number[-4:]}` | {bin_info}"
+            result = f"❌ Declined: {html.escape(e.user_message)} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
         except Exception as e:
-            result = f"❌ Error: {str(e)} | `{number[:6]}******{number[-4:]}` | {bin_info}"
+            result = f"❌ Error: {html.escape(str(e))} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
 
         results.append(result)
 
-    # 📤 Send combined reply
+    # 📤 Send combined reply safely
     reply = "\n\n".join(results)
-    import html
-
-    await update.message.reply_text(html.escape(reply), parse_mode="HTML")
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 # 🚀 Bot Launcher
 if __name__ == "__main__":
