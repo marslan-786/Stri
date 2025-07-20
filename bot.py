@@ -1,5 +1,6 @@
 import stripe
 import os
+import html
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -18,7 +19,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # 🔍 Main Card Checker
-import html
+# Test cards prefixes (Add more if needed)
+TEST_CARD_PREFIXES = [
+    "424242",  # Visa test
+    "400005",  # Visa debit test
+    "555555",  # Mastercard test
+    # add more prefixes here...
+]
+
+def is_test_card(number):
+    prefix = number[:6]
+    return prefix in TEST_CARD_PREFIXES
 
 async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = update.message.text.strip().split("\n")
@@ -33,7 +44,7 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         number, month, year, cvc = parts
         bin_number = number[:6]
 
-        # 🔎 BIN Info Lookup
+        # BIN Lookup
         try:
             res = requests.get(f"https://lookup.binlist.net/{bin_number}")
             if res.status_code == 200:
@@ -47,7 +58,7 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             bin_info = "BIN Lookup Failed"
 
-        # ✅ Stripe Auth Check (No capture, no redirect)
+        # Stripe Payment Intent creation
         try:
             intent = stripe.PaymentIntent.create(
                 amount=100,
@@ -62,26 +73,22 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     },
                 },
                 confirm=True,
-                capture_method="manual",
-                automatic_payment_methods={
-                    "enabled": True,
-                    "allow_redirects": "never"
-                }
+                capture_method="manual"
             )
 
             if intent.status == "requires_capture":
-                result = f"✅ Approved | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+                card_type = "Test Card" if is_test_card(number) else "Real Card"
+                result = f"✅ Approved ({card_type}) | <code>{number[:6]}******{number[-4:]}</code> | {bin_info}"
             else:
-                result = f"⚠️ Failed ({intent.status}) | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+                result = f"⚠️ Failed ({intent.status}) | <code>{number[:6]}******{number[-4:]}</code> | {bin_info}"
 
         except stripe.error.CardError as e:
-            result = f"❌ Declined: {html.escape(e.user_message)} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+            result = f"❌ Declined: {e.user_message} | <code>{number[:6]}******{number[-4:]}</code> | {bin_info}"
         except Exception as e:
-            result = f"❌ Error: {html.escape(str(e))} | <code>{number[:6]}******{number[-4:]}</code> | {html.escape(bin_info)}"
+            result = f"❌ Error: {str(e)} | <code>{number[:6]}******{number[-4:]}</code> | {bin_info}"
 
         results.append(result)
 
-    # 📤 Send combined reply safely
     reply = "\n\n".join(results)
     await update.message.reply_text(reply, parse_mode="HTML")
 
