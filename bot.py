@@ -77,7 +77,9 @@ async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📤 Send combined reply
     reply = "\n\n".join(results)
-    await update.message.reply_text(reply, parse_mode="Markdown")
+    import html
+
+    await update.message.reply_text(html.escape(reply), parse_mode="HTML")
 
 # 🚀 Bot Launcher
 if __name__ == "__main__":
